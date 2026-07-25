@@ -30,7 +30,7 @@ func main() {
 	defer db.Close()
 
 	Migrate(db)
-	p := tea.NewProgram(InitialModel(db))
+	p := tea.NewProgram(initialModel(db))
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Alas, there's been an error: %v", err)
 		os.Exit(1)
