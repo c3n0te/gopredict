@@ -32,7 +32,7 @@ func main() {
 	Migrate(db)
 	p := tea.NewProgram(initialModel(db))
 	if _, err := p.Run(); err != nil {
-		fmt.Printf("Alas, there's been an error: %v", err)
+		slog.Error(fmt.Sprintf("Alas, there's been an error: %v", err))
 		os.Exit(1)
 	}
 }

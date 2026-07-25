@@ -69,10 +69,6 @@ func newListKeyMap() *listKeyMap {
 			key.WithKeys("u"),
 			key.WithHelp("u", "update tles"),
 		),
-		insertItem: key.NewBinding(
-			key.WithKeys("a"),
-			key.WithHelp("a", "add item"),
-		),
 		toggleSpinner: key.NewBinding(
 			key.WithKeys("s"),
 			key.WithHelp("s", "toggle spinner"),
@@ -103,7 +99,6 @@ type model struct {
 	width, height int
 	once          *sync.Once
 	list          list.Model
-	itemGenerator *randomItemGenerator
 	keys          *listKeyMap
 	delegateKeys  *delegateKeyMap
 }
@@ -122,6 +117,22 @@ func (m *model) updateListProperties() {
 	// Update the model and list styles.
 	m.styles = newStyles(m.darkBG)
 	m.list.Styles.Title = m.styles.title
+}
+
+func (m model) newList(tles []TLE) {
+	numItems := len(m.list.Items())
+	for i := range numItems {
+		m.list.RemoveItem(i)
+	}
+
+	for i, tle := range tles {
+		tleItem := item{
+			title:       tle.SatName,
+			description: "",
+		}
+
+		m.list.InsertItem(i, tleItem)
+	}
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -148,9 +159,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch {
 		case key.Matches(msg, m.keys.updateSats):
-			tleStr := UpdateSats()
+			tleStr, err := UpdateSats()
+			if err != nil || tleStr == "" {
+				return m, nil
+			}
+
 			tles := ParseTLEs(tleStr)
 			UpsertTLEs(m.db, tles)
+			go m.newList(tles)
 			return m, nil
 
 		case key.Matches(msg, m.keys.toggleSpinner):
@@ -176,12 +192,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.list.SetShowHelp(!m.list.ShowHelp())
 			return m, nil
 
-		case key.Matches(msg, m.keys.insertItem):
-			m.delegateKeys.remove.SetEnabled(true)
-			newItem := m.itemGenerator.next()
-			insCmd := m.list.InsertItem(0, newItem)
-			statusCmd := m.list.NewStatusMessage(m.styles.statusMessage.Render("Added " + newItem.Title()))
-			return m, tea.Batch(insCmd, statusCmd)
 		}
 	}
 
@@ -209,11 +219,19 @@ func initialModel(db *sqlx.DB) model {
 	listKeys := newListKeyMap()
 
 	// Make initial list of items.
-	var itemGenerator randomItemGenerator
-	const numItems = 24
-	items := make([]list.Item, numItems)
-	for i := range numItems {
-		items[i] = itemGenerator.next()
+	items := []list.Item{}
+	tles, err := ReadTLEs(db)
+	if err != nil {
+		return m
+	}
+
+	for _, tle := range tles {
+		tleItem := item{
+			title:       tle.SatName,
+			description: "",
+		}
+
+		items = append(items, tleItem)
 	}
 
 	// Setup list.
@@ -236,7 +254,6 @@ func initialModel(db *sqlx.DB) model {
 	m.list = satList
 	m.keys = listKeys
 	m.delegateKeys = delegateKeys
-	m.itemGenerator = &itemGenerator
 
 	return m
 }
