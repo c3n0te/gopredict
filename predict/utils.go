@@ -2,22 +2,19 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
+	"gopredict/api"
 	"log/slog"
+	"os"
 	"strings"
 )
 
-type TLE struct {
-	SatName string
-	Line1   string
-	Line2   string
-}
-
-func ParseTLEs(tleStr string) []TLE {
+func ParseTLEs(tleStr string) []api.TLE {
 	reader := strings.NewReader(tleStr)
 	scanner := bufio.NewScanner(reader)
-	tles := []TLE{}
-	tle := TLE{}
+	tles := []api.TLE{}
+	tle := api.TLE{}
 
 	for scanner.Scan() {
 		tle.SatName = scanner.Text()
@@ -29,8 +26,19 @@ func ParseTLEs(tleStr string) []TLE {
 	}
 
 	if err := scanner.Err(); err != nil {
-		slog.Error(fmt.Sprintf("Scanner error encountered parsing TLE string: %v\n", err))
+		slog.Error(fmt.Sprintf("Scanner error encountered parsing api.TLE string: %v\n", err))
 	}
 
 	return tles
+}
+
+func ParseStationFile() ([]api.Station, error) {
+	stnData, err := os.ReadFile("./data/stations.json")
+	if err != nil {
+		return nil, err
+	}
+
+	var stns []api.Station
+	json.Unmarshal(stnData, &stns)
+	return stns, nil
 }

@@ -23,14 +23,6 @@ func newItemDelegate(keys *delegateKeyMap, styles *styles) list.DefaultDelegate 
 			switch {
 			case key.Matches(msg, keys.choose):
 				return m.NewStatusMessage(styles.statusMessage.Render("You chose " + title))
-
-			case key.Matches(msg, keys.remove):
-				index := m.Index()
-				m.RemoveItem(index)
-				if len(m.Items()) == 0 {
-					keys.remove.SetEnabled(false)
-				}
-				return m.NewStatusMessage(styles.statusMessage.Render("Deleted " + title))
 			}
 		}
 

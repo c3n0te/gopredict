@@ -1,6 +1,7 @@
 package main
 
 import (
+	"gopredict/api"
 	"sync"
 
 	"charm.land/bubbles/v2/key"
@@ -94,6 +95,7 @@ func newListKeyMap() *listKeyMap {
 
 type model struct {
 	db            *sqlx.DB
+	stations      []api.Station
 	styles        styles
 	darkBG        bool
 	width, height int
@@ -119,7 +121,7 @@ func (m *model) updateListProperties() {
 	m.list.Styles.Title = m.styles.title
 }
 
-func (m model) newList(tles []TLE) {
+func (m model) newList(tles []api.TLE) {
 	numItems := len(m.list.Items())
 	for i := range numItems {
 		m.list.RemoveItem(i)
@@ -215,14 +217,40 @@ func initialModel(db *sqlx.DB) model {
 	m.db = db
 	m.styles = newStyles(false) // default to dark background styles
 
-	delegateKeys := newDelegateKeyMap()
-	listKeys := newListKeyMap()
+	stns, err := ReadStations(m.db)
+	if err != nil {
+		return m
+	}
+
+	if len(stns) == 0 {
+		stns, err = ParseStationFile()
+		if err != nil {
+			return m
+		}
+
+		err = UpsertStations(m.db, stns)
+		if err != nil {
+			return m
+		}
+	}
+
+	m.stations = stns
 
 	// Make initial list of items.
 	items := []list.Item{}
-	tles, err := ReadTLEs(db)
+	tles, err := ReadTLEs(m.db)
 	if err != nil {
 		return m
+	}
+
+	if len(tles) == 0 {
+		tleStr, err := UpdateSats()
+		if err != nil || tleStr == "" {
+			return m
+		}
+
+		tles = ParseTLEs(tleStr)
+		UpsertTLEs(m.db, tles)
 	}
 
 	for _, tle := range tles {
@@ -235,6 +263,8 @@ func initialModel(db *sqlx.DB) model {
 	}
 
 	// Setup list.
+	delegateKeys := newDelegateKeyMap()
+	listKeys := newListKeyMap()
 	delegate := newItemDelegate(delegateKeys, &m.styles)
 	satList := list.New(items, delegate, 0, 0)
 	satList.Title = "GoPredict Satellite Tracking App"

@@ -11,7 +11,15 @@ func Migrate(db *sqlx.DB) {
 		satname			TEXT UNIQUE PRIMARY KEY,
       	line1 			TEXT UNIQUE,
       	line2 	 		TEXT UNIQUE
-    );`
+    );
+
+    CREATE TABLE IF NOT EXISTS Stations (
+    	stnname         TEXT UNIQUE PRIMARY KEY,
+    	latitude        FLOAT NOT NULL,
+    	longitude       FLOAT NOT NULL,
+    	altitude        FLOAT NOT NULL,
+    	minhorizon      FLOAT NOT NULL
+     );`
 
 	db.MustExec(schema)
 }
