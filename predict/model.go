@@ -142,8 +142,8 @@ func (m *model) updateListProperties() {
 func (m model) newPassTable(passes []sgp4.PassDetails) table.Model {
 	columns := []table.Column{
 		{Title: "MaxElev", Width: 15},
-		{Title: "AOS", Width: 25},
-		{Title: "LOS", Width: 25},
+		{Title: "AOS", Width: 35},
+		{Title: "LOS", Width: 35},
 		{Title: "Duration", Width: 15},
 	}
 
@@ -164,7 +164,7 @@ func (m model) newPassTable(passes []sgp4.PassDetails) table.Model {
 		table.WithRows(rows),
 		table.WithFocused(true),
 		table.WithHeight(7),
-		table.WithWidth(42),
+		table.WithWidth(100),
 	)
 
 	s := table.DefaultStyles()
@@ -196,39 +196,6 @@ func (m model) newList(tles []api.TLE) {
 		}
 
 		m.list.InsertItem(i, tleItem)
-	}
-}
-
-func (m model) updatePassTable(satname string) {
-	tle, err := ReadTLEBySatName(m.db, satname)
-	if err != nil {
-		slog.Error("Error reading TLE by satname: ", "error", err)
-	}
-
-	slog.Info(fmt.Sprintf("Retrieved tle from db: %v", tle))
-	tleElems := []string{tle.SatName, tle.Line1, tle.Line2}
-	tleStr := strings.Join(tleElems, "\n")
-	tleSgp4, err := sgp4.ParseTLE(tleStr)
-	startTime := time.Now().UTC()
-	stopTime := startTime.Add(24 * time.Hour) // Predict for the next 24 hours
-	stepSeconds := 30                         // Propagation step in seconds
-
-	for _, stn := range m.stations {
-		passes, err := tleSgp4.GeneratePasses(
-			stn.Latitude,
-			stn.Longitude,
-			stn.Altitude,
-			startTime,
-			stopTime,
-			stepSeconds,
-		)
-
-		if err != nil {
-			slog.Error("Error generating passes: ", "error", err)
-		}
-
-		t := m.newPassTable(passes)
-		m.table = t
 	}
 }
 
@@ -303,7 +270,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 				t := m.newPassTable(passes)
-				slog.Info(fmt.Sprintf("Table: %v", t))
 				m.table = t
 			}
 
