@@ -35,6 +35,7 @@ func ParseTLEs(tleStr string) []api.TLE {
 func ParseStationFile() ([]api.Station, error) {
 	stnData, err := os.ReadFile("./data/stations.json")
 	if err != nil {
+		slog.Error("Error reading station file: ", "error", err)
 		return nil, err
 	}
 

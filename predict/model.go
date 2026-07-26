@@ -1,15 +1,28 @@
 package main
 
 import (
+	"fmt"
 	"gopredict/api"
+	"log/slog"
+	"strings"
 	"sync"
+	"time"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/akhenakh/sgp4"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
+)
+
+type State int
+
+const (
+	ListView State = iota
+	PassView
 )
 
 type styles struct {
@@ -56,12 +69,12 @@ func (i item) FilterValue() string { return i.title }
 
 type listKeyMap struct {
 	updateSats       key.Binding
+	changeState      key.Binding
 	toggleSpinner    key.Binding
 	toggleTitleBar   key.Binding
 	toggleStatusBar  key.Binding
 	togglePagination key.Binding
 	toggleHelpMenu   key.Binding
-	insertItem       key.Binding
 }
 
 func newListKeyMap() *listKeyMap {
@@ -69,6 +82,10 @@ func newListKeyMap() *listKeyMap {
 		updateSats: key.NewBinding(
 			key.WithKeys("u"),
 			key.WithHelp("u", "update tles"),
+		),
+		changeState: key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "select sat"),
 		),
 		toggleSpinner: key.NewBinding(
 			key.WithKeys("s"),
@@ -95,12 +112,14 @@ func newListKeyMap() *listKeyMap {
 
 type model struct {
 	db            *sqlx.DB
+	state         State
 	stations      []api.Station
 	styles        styles
 	darkBG        bool
 	width, height int
 	once          *sync.Once
 	list          list.Model
+	table         table.Model
 	keys          *listKeyMap
 	delegateKeys  *delegateKeyMap
 }
@@ -120,6 +139,49 @@ func (m *model) updateListProperties() {
 	m.styles = newStyles(m.darkBG)
 	m.list.Styles.Title = m.styles.title
 }
+func (m model) newPassTable(passes []sgp4.PassDetails) table.Model {
+	columns := []table.Column{
+		{Title: "MaxElev", Width: 15},
+		{Title: "AOS", Width: 25},
+		{Title: "LOS", Width: 25},
+		{Title: "Duration", Width: 15},
+	}
+
+	rows := []table.Row{}
+	for _, pass := range passes {
+		row := table.Row{
+			fmt.Sprintf("%f", pass.MaxElevation),
+			pass.AOS.String(),
+			pass.LOS.String(),
+			pass.Duration.String(),
+		}
+
+		rows = append(rows, row)
+	}
+
+	t := table.New(
+		table.WithColumns(columns),
+		table.WithRows(rows),
+		table.WithFocused(true),
+		table.WithHeight(7),
+		table.WithWidth(42),
+	)
+
+	s := table.DefaultStyles()
+	s.Header = s.Header.
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("240")).
+		BorderBottom(true).
+		Bold(false)
+
+	s.Selected = s.Selected.
+		Foreground(lipgloss.Color("229")).
+		Background(lipgloss.Color("57")).
+		Bold(false)
+
+	t.SetStyles(s)
+	return t
+}
 
 func (m model) newList(tles []api.TLE) {
 	numItems := len(m.list.Items())
@@ -134,6 +196,39 @@ func (m model) newList(tles []api.TLE) {
 		}
 
 		m.list.InsertItem(i, tleItem)
+	}
+}
+
+func (m model) updatePassTable(satname string) {
+	tle, err := ReadTLEBySatName(m.db, satname)
+	if err != nil {
+		slog.Error("Error reading TLE by satname: ", "error", err)
+	}
+
+	slog.Info(fmt.Sprintf("Retrieved tle from db: %v", tle))
+	tleElems := []string{tle.SatName, tle.Line1, tle.Line2}
+	tleStr := strings.Join(tleElems, "\n")
+	tleSgp4, err := sgp4.ParseTLE(tleStr)
+	startTime := time.Now().UTC()
+	stopTime := startTime.Add(24 * time.Hour) // Predict for the next 24 hours
+	stepSeconds := 30                         // Propagation step in seconds
+
+	for _, stn := range m.stations {
+		passes, err := tleSgp4.GeneratePasses(
+			stn.Latitude,
+			stn.Longitude,
+			stn.Altitude,
+			startTime,
+			stopTime,
+			stepSeconds,
+		)
+
+		if err != nil {
+			slog.Error("Error generating passes: ", "error", err)
+		}
+
+		t := m.newPassTable(passes)
+		m.table = t
 	}
 }
 
@@ -171,6 +266,49 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			go m.newList(tles)
 			return m, nil
 
+		case key.Matches(msg, m.keys.changeState):
+			switch m.state {
+			case ListView:
+				m.state = PassView
+			case PassView:
+				m.state = ListView
+			}
+
+			satname := m.list.SelectedItem().FilterValue()
+			tle, err := ReadTLEBySatName(m.db, satname)
+			if err != nil {
+				slog.Error("Error reading TLE by satname: ", "error", err)
+			}
+
+			slog.Info(fmt.Sprintf("Retrieved tle from db: %v", tle))
+			tleElems := []string{tle.SatName, tle.Line1, tle.Line2}
+			tleStr := strings.Join(tleElems, "\n")
+			tleSgp4, err := sgp4.ParseTLE(tleStr)
+			startTime := time.Now().UTC()
+			stopTime := startTime.Add(24 * time.Hour) // Predict for the next 24 hours
+			stepSeconds := 30                         // Propagation step in seconds
+
+			for _, stn := range m.stations {
+				passes, err := tleSgp4.GeneratePasses(
+					stn.Latitude,
+					stn.Longitude,
+					stn.Altitude,
+					startTime,
+					stopTime,
+					stepSeconds,
+				)
+
+				if err != nil {
+					slog.Error("Error generating passes: ", "error", err)
+				}
+
+				t := m.newPassTable(passes)
+				slog.Info(fmt.Sprintf("Table: %v", t))
+				m.table = t
+			}
+
+			return m, nil
+
 		case key.Matches(msg, m.keys.toggleSpinner):
 			cmd := m.list.ToggleSpinner()
 			return m, cmd
@@ -198,16 +336,33 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// This will also call our delegate's update function.
-	newListModel, cmd := m.list.Update(msg)
-	m.list = newListModel
-	cmds = append(cmds, cmd)
+	switch m.state {
+	case PassView:
+		var cmd tea.Cmd
+		m.table, cmd = m.table.Update(msg)
+		cmds = append(cmds, cmd)
+
+	case ListView:
+		newListModel, cmd := m.list.Update(msg)
+		m.list = newListModel
+		cmds = append(cmds, cmd)
+	}
 
 	return m, tea.Batch(cmds...)
 }
 
 func (m model) View() tea.View {
-	v := tea.NewView(m.styles.app.Render(m.list.View()))
-	v.AltScreen = true
+	v := tea.NewView("")
+
+	switch m.state {
+	case ListView:
+		v = tea.NewView(m.styles.app.Render(m.list.View()))
+		v.AltScreen = true
+
+	case PassView:
+		v = tea.NewView(m.styles.box.Render(m.table.View()) + "\n  " + m.table.HelpView() + "\n")
+	}
+
 	return v
 }
 
@@ -216,6 +371,7 @@ func initialModel(db *sqlx.DB) model {
 	m := model{}
 	m.db = db
 	m.styles = newStyles(false) // default to dark background styles
+	m.state = ListView
 
 	stns, err := ReadStations(m.db)
 	if err != nil {
@@ -262,6 +418,9 @@ func initialModel(db *sqlx.DB) model {
 		items = append(items, tleItem)
 	}
 
+	t := m.newPassTable([]sgp4.PassDetails{})
+	m.table = t
+
 	// Setup list.
 	delegateKeys := newDelegateKeyMap()
 	listKeys := newListKeyMap()
@@ -272,8 +431,8 @@ func initialModel(db *sqlx.DB) model {
 	satList.AdditionalFullHelpKeys = func() []key.Binding {
 		return []key.Binding{
 			listKeys.updateSats,
+			listKeys.changeState,
 			listKeys.toggleSpinner,
-			listKeys.insertItem,
 			listKeys.toggleTitleBar,
 			listKeys.toggleStatusBar,
 			listKeys.togglePagination,

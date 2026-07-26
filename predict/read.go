@@ -7,6 +7,36 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
+func ReadTLEBySatName(db *sqlx.DB, satname string) (*api.TLE, error) {
+	rows, err := db.Queryx(
+		`SELECT
+			satname,
+			line1,
+			line2
+        FROM TLEs
+        WHERE satname=?
+        LIMIT 1`,
+		satname,
+	)
+
+	if err != nil {
+		slog.Error("Failed to query TLEs table: ", "error", err)
+		return nil, err
+	}
+
+	defer rows.Close()
+	tle := api.TLE{}
+
+	for rows.Next() {
+		err = rows.StructScan(&tle)
+		if err != nil {
+			slog.Error("Failed to scan tle struct: ", "error", err)
+		}
+	}
+
+	return &tle, nil
+}
+
 func ReadTLEs(db *sqlx.DB) ([]api.TLE, error) {
 	rows, err := db.Queryx(
 		`SELECT
