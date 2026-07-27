@@ -182,7 +182,7 @@ func (m model) newPassTable(passes []api.PassRow) table.Model {
 		table.WithColumns(columns),
 		table.WithRows(rows),
 		table.WithFocused(true),
-		table.WithHeight(7),
+		table.WithHeight(15),
 		table.WithWidth(100),
 	)
 

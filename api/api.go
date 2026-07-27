@@ -13,3 +13,11 @@ type TLE struct {
 	Line1   string `json:"line1,omitempty" db:"line1"`
 	Line2   string `json:"line2,omitempty" db:"line2"`
 }
+
+type PassRow struct {
+	StnName      string
+	MaxElevation float64
+	AOS          string
+	LOS          string
+	Duration     string
+}
