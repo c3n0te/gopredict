@@ -139,21 +139,40 @@ func (m *model) updateListProperties() {
 	m.styles = newStyles(m.darkBG)
 	m.list.Styles.Title = m.styles.title
 }
-func (m model) newPassTable(passes []sgp4.PassDetails) table.Model {
+
+func (m model) newList(tles []api.TLE) {
+	numItems := len(m.list.Items())
+	for i := range numItems {
+		m.list.RemoveItem(i)
+	}
+
+	for i, tle := range tles {
+		tleItem := item{
+			title:       tle.SatName,
+			description: "",
+		}
+
+		m.list.InsertItem(i, tleItem)
+	}
+}
+
+func (m model) newPassTable(passes []api.PassRow) table.Model {
 	columns := []table.Column{
-		{Title: "MaxElev", Width: 15},
-		{Title: "AOS", Width: 35},
-		{Title: "LOS", Width: 35},
+		{Title: "Station", Width: 15},
+		{Title: "MaxElev", Width: 10},
+		{Title: "AOS", Width: 30},
+		{Title: "LOS", Width: 30},
 		{Title: "Duration", Width: 15},
 	}
 
 	rows := []table.Row{}
 	for _, pass := range passes {
 		row := table.Row{
-			fmt.Sprintf("%f", pass.MaxElevation),
-			pass.AOS.String(),
-			pass.LOS.String(),
-			pass.Duration.String(),
+			pass.StnName,
+			fmt.Sprintf("%.2f", pass.MaxElevation),
+			pass.AOS,
+			pass.LOS,
+			pass.Duration,
 		}
 
 		rows = append(rows, row)
@@ -181,22 +200,6 @@ func (m model) newPassTable(passes []sgp4.PassDetails) table.Model {
 
 	t.SetStyles(s)
 	return t
-}
-
-func (m model) newList(tles []api.TLE) {
-	numItems := len(m.list.Items())
-	for i := range numItems {
-		m.list.RemoveItem(i)
-	}
-
-	for i, tle := range tles {
-		tleItem := item{
-			title:       tle.SatName,
-			description: "",
-		}
-
-		m.list.InsertItem(i, tleItem)
-	}
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -245,6 +248,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			tle, err := ReadTLEBySatName(m.db, satname)
 			if err != nil {
 				slog.Error("Error reading TLE by satname: ", "error", err)
+				return m, nil
 			}
 
 			slog.Info(fmt.Sprintf("Retrieved tle from db: %v", tle))
@@ -254,6 +258,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			startTime := time.Now().UTC()
 			stopTime := startTime.Add(24 * time.Hour) // Predict for the next 24 hours
 			stepSeconds := 30                         // Propagation step in seconds
+			passRows := []api.PassRow{}
 
 			for _, stn := range m.stations {
 				passes, err := tleSgp4.GeneratePasses(
@@ -267,12 +272,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				if err != nil {
 					slog.Error("Error generating passes: ", "error", err)
+					return m, nil
 				}
 
-				t := m.newPassTable(passes)
-				m.table = t
+				passRow := api.PassRow{}
+				for _, pass := range passes {
+					passRow.StnName = stn.StnName
+					passRow.MaxElevation = pass.MaxElevation
+					passRow.AOS = pass.AOS.String()
+					passRow.LOS = pass.LOS.String()
+					passRow.Duration = pass.Duration.String()
+					passRows = append(passRows, passRow)
+				}
 			}
 
+			t := m.newPassTable(passRows)
+			m.table = t
 			return m, nil
 
 		case key.Matches(msg, m.keys.toggleSpinner):
@@ -339,21 +354,16 @@ func initialModel(db *sqlx.DB) model {
 	m.styles = newStyles(false) // default to dark background styles
 	m.state = ListView
 
-	stns, err := ReadStations(m.db)
+	stns, err := ParseStationFile()
 	if err != nil {
+		slog.Error("Failed to parse stations file: ", "error", err)
 		return m
 	}
 
-	if len(stns) == 0 {
-		stns, err = ParseStationFile()
-		if err != nil {
-			return m
-		}
-
-		err = UpsertStations(m.db, stns)
-		if err != nil {
-			return m
-		}
+	err = UpsertStations(m.db, stns)
+	if err != nil {
+		slog.Error("Failed to upsert stations: ", "error", err)
+		return m
 	}
 
 	m.stations = stns
@@ -384,7 +394,7 @@ func initialModel(db *sqlx.DB) model {
 		items = append(items, tleItem)
 	}
 
-	t := m.newPassTable([]sgp4.PassDetails{})
+	t := m.newPassTable([]api.PassRow{})
 	m.table = t
 
 	// Setup list.
