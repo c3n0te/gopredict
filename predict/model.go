@@ -277,6 +277,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				passRow := api.PassRow{}
 				for _, pass := range passes {
+					if pass.MaxElevation < stn.MinHorizon {
+						continue
+					}
+
 					passRow.StnName = stn.StnName
 					passRow.MaxElevation = pass.MaxElevation
 					passRow.AOS = pass.AOS.String()
